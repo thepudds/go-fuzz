@@ -23,7 +23,7 @@ import (
 const fuzzdepPkg = "_go_fuzz_dep_"
 const prevLocationVar = "_go_fuzz_previous_location"
 
-func instrument(pkg, fullName string, fset *token.FileSet, parsedFile *ast.File, info *types.Info, out io.Writer, blocks *[]CoverBlock, sonar *[]CoverBlock, addPkgGlobals bool) {
+func instrument(pkg, fullName string, fset *token.FileSet, parsedFile *ast.File, info *types.Info, out io.Writer, blocks *[]CoverBlock, sonar *[]CoverBlock, addedPkgGlobals *bool) {
 	file := &File{
 		fset:     fset,
 		pkg:      pkg,
@@ -31,11 +31,24 @@ func instrument(pkg, fullName string, fset *token.FileSet, parsedFile *ast.File,
 		astFile:  parsedFile,
 		blocks:   blocks,
 		info:     info,
+
+		addedCounters: false,
 	}
 	if sonar == nil {
 		file.addImport("go-fuzz-dep", fuzzdepPkg, "CoverTab")
 		ast.Walk(file, file.astFile)
-		ast.Walk(&PrevLocationWalker{addPkgGlobals: addPkgGlobals}, file.astFile)
+
+		// TODO(thepudds): need to add package level global only once per
+		// package, but we don't want to add it to packages that don't need it.
+		// This is a workaround to avoid recompiling package that otherwise don't need
+		// to be recompiled, to avoid errors like:
+		//   .../internal/syscall/unix/at_darwin.go:25: missing function body
+		var needPkgGlobals bool
+		if !*addedPkgGlobals && file.addedCounters {
+			needPkgGlobals = true
+			*addedPkgGlobals = true
+		}
+		ast.Walk(&PrevLocationWalker{needPkgGlobals: needPkgGlobals}, file.astFile)
 	} else {
 		s := &Sonar{
 			fset:     fset,
@@ -494,6 +507,9 @@ type File struct {
 	astFile  *ast.File
 	blocks   *[]CoverBlock
 	info     *types.Info
+
+	// TODO(thepudds): track this here for now. probably better way.
+	addedCounters bool
 }
 
 var slashslash = []byte("//")
@@ -531,6 +547,7 @@ func (f *File) Visit(node ast.Node) ast.Visitor {
 			}
 		}
 		n.List = f.addCounters(n.Lbrace, n.Rbrace+1, n.List, true) // +1 to step past closing brace.
+		f.addedCounters = true
 	case *ast.IfStmt:
 		if n.Init != nil {
 			ast.Walk(f, n.Init)
@@ -971,7 +988,7 @@ func (f *File) newCounterTrackLoc(start, end token.Pos, numStmt int) []ast.Stmt 
 // PrevLocationWalker is an ast.Vistor that adds
 // declarations for _go_fuzz_previous_location.
 type PrevLocationWalker struct {
-	addPkgGlobals bool
+	needPkgGlobals bool // add in a top-level declaration for _go_fuzz_previous_location
 }
 
 // Visit inserts declarations of the previous location variable
@@ -1014,7 +1031,7 @@ func (p *PrevLocationWalker) Visit(node ast.Node) ast.Visitor {
 		n.Body.List = append(newStmts, n.Body.List...)
 
 	case *ast.File:
-		if p.addPkgGlobals {
+		if p.needPkgGlobals {
 			// Some top-level declarations use boolean operators such as '&&',
 			// which means they get instrumented by the normal go-fuzz-build instrumentation
 			// (e.g,. src/math/exp_asm.go:11). Make sure there is also a top-level declaration
@@ -1031,6 +1048,7 @@ func (p *PrevLocationWalker) Visit(node ast.Node) ast.Visitor {
 			// place it last
 			n.Decls = append(n.Decls, decl)
 		}
+
 	}
 
 	return p
