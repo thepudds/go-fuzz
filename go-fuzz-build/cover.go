@@ -23,7 +23,7 @@ import (
 const fuzzdepPkg = "_go_fuzz_dep_"
 const prevLocationVar = "_go_fuzz_previous_location"
 
-func instrument(pkg, fullName string, fset *token.FileSet, parsedFile *ast.File, info *types.Info, out io.Writer, blocks *[]CoverBlock, sonar *[]CoverBlock) {
+func instrument(pkg, fullName string, fset *token.FileSet, parsedFile *ast.File, info *types.Info, out io.Writer, blocks *[]CoverBlock, sonar *[]CoverBlock, addPkgGlobals bool) {
 	file := &File{
 		fset:     fset,
 		pkg:      pkg,
@@ -35,7 +35,7 @@ func instrument(pkg, fullName string, fset *token.FileSet, parsedFile *ast.File,
 	if sonar == nil {
 		file.addImport("go-fuzz-dep", fuzzdepPkg, "CoverTab")
 		ast.Walk(file, file.astFile)
-		addPrevLocation(file.astFile) // add declarations for _go_fuzz_previous_location
+		ast.Walk(&PrevLocationWalker{addPkgGlobals: addPkgGlobals}, file.astFile)
 	} else {
 		s := &Sonar{
 			fset:     fset,
@@ -968,10 +968,14 @@ func (f *File) newCounterTrackLoc(start, end token.Pos, numStmt int) []ast.Stmt 
 	return stmts
 }
 
-// PrevLocationWalker is an ast.Vistor.
-type PrevLocationWalker struct{}
+// PrevLocationWalker is an ast.Vistor that adds
+// declarations for _go_fuzz_previous_location.
+type PrevLocationWalker struct {
+	addPkgGlobals bool
+}
 
-// Visit inserts declarations of the previous location variable.
+// Visit inserts declarations of the previous location variable
+// in individual functions, as well as a top-level declaration.
 func (p *PrevLocationWalker) Visit(node ast.Node) ast.Visitor {
 
 	switch n := node.(type) {
@@ -980,11 +984,10 @@ func (p *PrevLocationWalker) Visit(node ast.Node) ast.Visitor {
 			// Don't instrument init functions (similar to file.Visit)
 			return nil
 		}
-
-                if n.Body == nil || len(n.Body.List) == 0 {
-			return nil // TODO
+		if n.Body == nil || len(n.Body.List) == 0 {
+			// Not useful to instrument
+			return nil
 		}
-        
 		prevLocation := ast.NewIdent(prevLocationVar)
 		newStmts := []ast.Stmt{
 			&ast.DeclStmt{
@@ -993,7 +996,7 @@ func (p *PrevLocationWalker) Visit(node ast.Node) ast.Visitor {
 					Specs: []ast.Spec{
 						&ast.ValueSpec{
 							Names: []*ast.Ident{prevLocation},
-							Type:  ast.NewIdent("int"),
+							Type:  ast.NewIdent("_go_fuzz_dep_.Int"),
 						},
 					},
 				},
@@ -1009,13 +1012,28 @@ func (p *PrevLocationWalker) Visit(node ast.Node) ast.Visitor {
 			},
 		}
 		n.Body.List = append(newStmts, n.Body.List...)
+
+	case *ast.File:
+		if p.addPkgGlobals {
+			// Some top-level declarations use boolean operators such as '&&',
+			// which means they get instrumented by the normal go-fuzz-build instrumentation
+			// (e.g,. src/math/exp_asm.go:11). Make sure there is also a top-level declaration
+			// of _go_fuzz_previous_location
+			decl := &ast.GenDecl{
+				Tok: token.VAR,
+				Specs: []ast.Spec{
+					&ast.ValueSpec{
+						Names: []*ast.Ident{ast.NewIdent(prevLocationVar)},
+						Type:  ast.NewIdent("_go_fuzz_dep_.Int"),
+					},
+				},
+			}
+			// place it last
+			n.Decls = append(n.Decls, decl)
+		}
 	}
 
 	return p
-}
-
-func addPrevLocation(astFile *ast.File) {
-	ast.Walk(&PrevLocationWalker{}, astFile)
 }
 
 func (f *File) print(w io.Writer) {
