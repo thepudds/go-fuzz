@@ -21,7 +21,8 @@ import (
 )
 
 const fuzzdepPkg = "_go_fuzz_dep_"
-const prevLocationVar = "_go_fuzz_previous_location"
+const prevLocationVar1 = "_go_fuzz_previous_loc1"
+const prevLocationVar2 = "_go_fuzz_previous_loc2"
 
 func instrument(pkg, fullName string, fset *token.FileSet, parsedFile *ast.File, info *types.Info, out io.Writer, blocks *[]CoverBlock, sonar *[]CoverBlock, addedPkgGlobals *bool) {
 	file := &File{
@@ -928,10 +929,17 @@ func (f *File) newCounter(start, end token.Pos, numStmt int) []ast.Stmt {
 //
 // newCounterTrackLoc instead inserts code like:
 //
-//   _go_fuzz_dep_.CoverTab[22222 ^ _go_fuzz_previous_location]++
-//   _go_fuzz_previous_location = 22222 >> 1
+//   _go_fuzz_dep_.CoverTab[11111 ^ _go_fuzz_previous_loc1 ^ _go_fuzz_previous_loc2]++
+//   _go_fuzz_previous_loc2 = _go_fuzz_previous_loc1 >> 1
+//   _go_fuzz_previous_loc1 = 11111 >> 1
 //
-// The shift helps differentiate A->B vs. B->A.
+// This provides a partial view of the path to current position from the last 2 recorded positions
+// within this function invocation.
+// The xor helps track the path through the function,
+// and the shifts differentiate A->B->C vs. C->B->A, for example.
+//
+// Perhaps three locations together provide a better view of the path through the function,
+// or perhaps that does not help in a material way. This is an experiment.
 func (f *File) newCounterTrackLoc(start, end token.Pos, numStmt int) []ast.Stmt {
 	cnt := genCounter()
 
@@ -948,7 +956,11 @@ func (f *File) newCounterTrackLoc(start, end token.Pos, numStmt int) []ast.Stmt 
 	idx := &ast.BinaryExpr{
 		X:  id,
 		Op: token.XOR,
-		Y:  ast.NewIdent(prevLocationVar),
+		Y: &ast.BinaryExpr{
+			X:  ast.NewIdent(prevLocationVar1),
+			Op: token.XOR,
+			Y:  ast.NewIdent(prevLocationVar2),
+		},
 	}
 	counter := &ast.IndexExpr{
 		X: &ast.SelectorExpr{
@@ -957,37 +969,39 @@ func (f *File) newCounterTrackLoc(start, end token.Pos, numStmt int) []ast.Stmt 
 		},
 		Index: idx,
 	}
-	shift := &ast.AssignStmt{
-		Lhs: []ast.Expr{
-			ast.NewIdent(prevLocationVar),
-		},
-		Tok: token.ASSIGN,
-		Rhs: []ast.Expr{
-			&ast.BinaryExpr{
-				X:  id,
-				Op: token.SHR,
-				Y: &ast.BasicLit{
-					Kind:  token.INT,
-					Value: strconv.Itoa(1),
+	shift := func(left, right ast.Expr) *ast.AssignStmt {
+		return &ast.AssignStmt{
+			Lhs: []ast.Expr{
+				left,
+			},
+			Tok: token.ASSIGN,
+			Rhs: []ast.Expr{
+				&ast.BinaryExpr{
+					X:  right,
+					Op: token.SHR,
+					Y: &ast.BasicLit{
+						Kind:  token.INT,
+						Value: strconv.Itoa(1),
+					},
 				},
 			},
-		},
+		}
 	}
-
 	stmts := []ast.Stmt{
 		&ast.IncDecStmt{
 			X:   counter,
 			Tok: token.INC,
 		},
-		shift,
+		shift(ast.NewIdent(prevLocationVar2), ast.NewIdent(prevLocationVar1)),
+		shift(ast.NewIdent(prevLocationVar1), id),
 	}
 	return stmts
 }
 
 // PrevLocationWalker is an ast.Vistor that adds
-// declarations for _go_fuzz_previous_location.
+// declarations for _go_fuzz_previous_loc.
 type PrevLocationWalker struct {
-	needPkgGlobals bool // add in a top-level declaration for _go_fuzz_previous_location
+	needPkgGlobals bool // add in a top-level declaration for _go_fuzz_previous_loc
 }
 
 // Visit inserts declarations of the previous location variable
@@ -1004,29 +1018,35 @@ func (p *PrevLocationWalker) Visit(node ast.Node) ast.Visitor {
 			// Not useful to instrument
 			return nil
 		}
-		prevLocation := ast.NewIdent(prevLocationVar)
-		newStmts := []ast.Stmt{
-			&ast.DeclStmt{
-				Decl: &ast.GenDecl{
-					Tok: token.VAR,
-					Specs: []ast.Spec{
-						&ast.ValueSpec{
-							Names: []*ast.Ident{prevLocation},
-							Type:  ast.NewIdent("_go_fuzz_dep_.Int"),
+
+		declare := func(ident string) []ast.Stmt {
+			return []ast.Stmt{
+				&ast.DeclStmt{
+					Decl: &ast.GenDecl{
+						Tok: token.VAR,
+						Specs: []ast.Spec{
+							&ast.ValueSpec{
+								Names: []*ast.Ident{ast.NewIdent(ident)},
+								Type:  ast.NewIdent("_go_fuzz_dep_.Int"),
+							},
 						},
 					},
 				},
-			},
-			&ast.AssignStmt{
-				Lhs: []ast.Expr{
-					ast.NewIdent("_"),
+				&ast.AssignStmt{
+					Lhs: []ast.Expr{
+						ast.NewIdent("_"),
+					},
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{
+						ast.NewIdent(ident),
+					},
 				},
-				Tok: token.ASSIGN,
-				Rhs: []ast.Expr{
-					prevLocation,
-				},
-			},
+			}
 		}
+
+		var newStmts []ast.Stmt
+		newStmts = append(newStmts, declare(prevLocationVar1)...)
+		newStmts = append(newStmts, declare(prevLocationVar2)...)
 		n.Body.List = append(newStmts, n.Body.List...)
 
 	case *ast.File:
@@ -1034,18 +1054,20 @@ func (p *PrevLocationWalker) Visit(node ast.Node) ast.Visitor {
 			// Some top-level declarations use boolean operators such as '&&',
 			// which means they get instrumented by the normal go-fuzz-build instrumentation
 			// (e.g,. src/math/exp_asm.go:11). Make sure there is also a top-level declaration
-			// of _go_fuzz_previous_location
-			decl := &ast.GenDecl{
-				Tok: token.VAR,
-				Specs: []ast.Spec{
-					&ast.ValueSpec{
-						Names: []*ast.Ident{ast.NewIdent(prevLocationVar)},
-						Type:  ast.NewIdent("_go_fuzz_dep_.Int"),
+			// of _go_fuzz_previous_loc
+			declare := func(ident string) *ast.GenDecl {
+				return &ast.GenDecl{
+					Tok: token.VAR,
+					Specs: []ast.Spec{
+						&ast.ValueSpec{
+							Names: []*ast.Ident{ast.NewIdent(ident)},
+							Type:  ast.NewIdent("_go_fuzz_dep_.Int"),
+						},
 					},
-				},
+				}
 			}
-			// place it last
-			n.Decls = append(n.Decls, decl)
+			// place them last
+			n.Decls = append(n.Decls, declare(prevLocationVar1), declare(prevLocationVar2))
 		}
 
 	}
