@@ -503,14 +503,6 @@ func (c *Context) calcIgnore() {
 		"runtime/cgo":   true,
 		"runtime/pprof": true,
 		"runtime/race":  true,
-
-		// TODO(thepudds): temporary workaround for prev location tracking error
-		// For reasons that are not yet obvious, the location tracking changes
-		// are triggering errors on darwin:
-		//   .../internal/syscall/unix/at_darwin.go:25: missing function body
-		// which might be due to:
-		//   //go:linkname unlinkat syscall.unlinkat
-		"internal/syscall/unix": true,
 	}
 
 	// Roots: must not instrument these, nor any of their dependencies, to avoid import cycles.
