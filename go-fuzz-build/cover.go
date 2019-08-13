@@ -717,7 +717,7 @@ func (f *File) addCounters(pos, blockEnd token.Pos, list []ast.Stmt, extendToClo
 		// For now, leaving as-is at least helps us avoid tracking the location of the empty else blocks that are auto-added.
 		// One way to rationalize this might be that it helps tracked locations correspond to places that code
 		// exectued (i.e., non-zero length statement list).
-		return f.newCounter(pos, blockEnd, 0)
+		return f.newCounter(pos, blockEnd, 0, false)
 	}
 	// We have a block (statement list), but it may have several basic blocks due to the
 	// appearance of statements that affect the flow of control.
@@ -744,6 +744,7 @@ func (f *File) addCounters(pos, blockEnd token.Pos, list []ast.Stmt, extendToClo
 			// We want to track the prior location only once per "real" block.
 			// TODO(thepudds): this is probably an approximation of the proper way to check this,
 			// but it at least serves as a proof-of-concept for a basic fuzzing speed test.
+			updateLocation := true
 			if last != len(list) {
 				// Use a traditional counter, and do not update our prior location.
 				// If we hit this case, it means we have a statement list
@@ -763,12 +764,9 @@ func (f *File) addCounters(pos, blockEnd token.Pos, list []ast.Stmt, extendToClo
 				// 	   	  // 4. DO update previous_loc here.
 				// 	   }
 				// 	 }
-				counterStmts = f.newCounter(pos, end, last)
-			} else {
-				// Do update our location, and use our previous location as
-				// part of coverage index.
-				counterStmts = f.newCounterTrackLoc(pos, end, last)
+				updateLocation = false
 			}
+			counterStmts = f.newCounter(pos, end, last, updateLocation)
 			newList = append(newList, counterStmts...)
 		}
 		newList = append(newList, list[0:last]...)
@@ -891,43 +889,15 @@ func genCounter() int {
 	return int(uint16(hash[0]) | uint16(hash[1])<<8)
 }
 
-func (f *File) newCounter(start, end token.Pos, numStmt int) []ast.Stmt {
-	cnt := genCounter()
-
-	if f.blocks != nil {
-		s := f.fset.Position(start)
-		e := f.fset.Position(end)
-		*f.blocks = append(*f.blocks, CoverBlock{cnt, f.fullName, s.Line, s.Column, e.Line, e.Column, numStmt})
-	}
-
-	idx := &ast.BasicLit{
-		Kind:  token.INT,
-		Value: strconv.Itoa(cnt),
-	}
-	counter := &ast.IndexExpr{
-		X: &ast.SelectorExpr{
-			X:   ast.NewIdent(fuzzdepPkg),
-			Sel: ast.NewIdent("CoverTab"),
-		},
-		Index: idx,
-	}
-	return []ast.Stmt{
-		&ast.IncDecStmt{
-			X:   counter,
-			Tok: token.INC,
-		},
-	}
-}
-
-// newCounterTrackLoc inserts code to update coverage, including
+// newCounter inserts code to update coverage, including
 // tracking the location and using the previously tracked location
 // to xor into the id. In some cases, this might help
 // with better differentiation between edges traversed.
-// The normal newCounter inserts code like:
+// The prior version of newCounter inserted code like:
 //
 //     _go_fuzz_dep_.CoverTab[11111]++
 //
-// newCounterTrackLoc instead inserts code like:
+// newCounter now instead inserts code like:
 //
 //   _go_fuzz_dep_.CoverTab[11111 ^ _go_fuzz_previous_loc1 ^ _go_fuzz_previous_loc2]++
 //   _go_fuzz_previous_loc2 = _go_fuzz_previous_loc1 >> 1
@@ -936,11 +906,11 @@ func (f *File) newCounter(start, end token.Pos, numStmt int) []ast.Stmt {
 // This provides a partial view of the path to current position from the last 2 recorded positions
 // within this function invocation.
 // The xor helps track the path through the function,
-// and the shifts differentiate A->B->C vs. C->B->A, for example.
+// and the shifts differentiate A->B->C vs. B->A->C, for example.
 //
 // Perhaps three locations together provide a better view of the path through the function,
 // or perhaps that does not help in a material way. This is an experiment.
-func (f *File) newCounterTrackLoc(start, end token.Pos, numStmt int) []ast.Stmt {
+func (f *File) newCounter(start, end token.Pos, numStmt int, trackLoc bool) []ast.Stmt {
 	cnt := genCounter()
 
 	if f.blocks != nil {
@@ -969,6 +939,15 @@ func (f *File) newCounterTrackLoc(start, end token.Pos, numStmt int) []ast.Stmt 
 		},
 		Index: idx,
 	}
+	stmts := []ast.Stmt{
+		&ast.IncDecStmt{
+			X:   counter,
+			Tok: token.INC,
+		},
+	}
+	if !trackLoc {
+		return stmts
+	}
 	shift := func(left, right ast.Expr) *ast.AssignStmt {
 		return &ast.AssignStmt{
 			Lhs: []ast.Expr{
@@ -987,14 +966,8 @@ func (f *File) newCounterTrackLoc(start, end token.Pos, numStmt int) []ast.Stmt 
 			},
 		}
 	}
-	stmts := []ast.Stmt{
-		&ast.IncDecStmt{
-			X:   counter,
-			Tok: token.INC,
-		},
-		shift(ast.NewIdent(prevLocationVar2), ast.NewIdent(prevLocationVar1)),
-		shift(ast.NewIdent(prevLocationVar1), id),
-	}
+	stmts = append(stmts, shift(ast.NewIdent(prevLocationVar2), ast.NewIdent(prevLocationVar1)))
+	stmts = append(stmts, shift(ast.NewIdent(prevLocationVar1), id))
 	return stmts
 }
 
