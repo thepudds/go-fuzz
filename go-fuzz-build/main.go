@@ -503,6 +503,10 @@ func (c *Context) calcIgnore() {
 		"runtime/cgo":   true,
 		"runtime/pprof": true,
 		"runtime/race":  true,
+
+		// TODO(thepudds): temporary workaround for prev location tracking error:
+		//    internal/syscall/unix/at_darwin.go:25: missing function body
+		"internal/syscall/unix/": true,
 	}
 
 	// Roots: must not instrument these, nor any of their dependencies, to avoid import cycles.
