@@ -981,6 +981,10 @@ func (p *PrevLocationWalker) Visit(node ast.Node) ast.Visitor {
 			return nil
 		}
 
+                if n.Body == nil || len(n.Body.List) == 0 {
+			return nil // TODO
+		}
+        
 		prevLocation := ast.NewIdent(prevLocationVar)
 		newStmts := []ast.Stmt{
 			&ast.DeclStmt{
