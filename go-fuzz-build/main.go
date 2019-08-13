@@ -654,7 +654,7 @@ func (c *Context) instrumentPackages(blocks *[]CoverBlock, sonar *[]CoverBlock) 
 		}
 		path := filepath.Join(c.workdir, root, "src", pkg.PkgPath) // TODO: need filepath.FromSlash for pkg.PkgPath?
 
-		addPkgGlobals := true
+		addedPkgGlobals := false
 		for i, fullName := range pkg.CompiledGoFiles {
 			fname := filepath.Base(fullName)
 			if !strings.HasSuffix(fname, ".go") {
@@ -673,11 +673,7 @@ func (c *Context) instrumentPackages(blocks *[]CoverBlock, sonar *[]CoverBlock) 
 			buf := new(bytes.Buffer)
 			content := c.readFile(fullName)
 			buf.Write(initialComments(content)) // Retain '// +build' directives.
-			instrument(pkg.PkgPath, fullName, pkg.Fset, f, pkg.TypesInfo, buf, blocks, sonar, addPkgGlobals)
-			if addPkgGlobals {
-				// only add once
-				addPkgGlobals = false
-			}
+			instrument(pkg.PkgPath, fullName, pkg.Fset, f, pkg.TypesInfo, buf, blocks, sonar, &addedPkgGlobals)
 			tmp := c.tempFile()
 			c.writeFile(tmp, buf.Bytes())
 			outpath := filepath.Join(path, fname)
