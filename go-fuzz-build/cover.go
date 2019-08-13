@@ -21,6 +21,7 @@ import (
 )
 
 const fuzzdepPkg = "_go_fuzz_dep_"
+const prevLocationVar = "_go_fuzz_previous_location"
 
 func instrument(pkg, fullName string, fset *token.FileSet, parsedFile *ast.File, info *types.Info, out io.Writer, blocks *[]CoverBlock, sonar *[]CoverBlock) {
 	file := &File{
@@ -34,6 +35,7 @@ func instrument(pkg, fullName string, fset *token.FileSet, parsedFile *ast.File,
 	if sonar == nil {
 		file.addImport("go-fuzz-dep", fuzzdepPkg, "CoverTab")
 		ast.Walk(file, file.astFile)
+		addPrevLocation(file.astFile) // add declarations for _go_fuzz_previous_location
 	} else {
 		s := &Sonar{
 			fset:     fset,
@@ -504,6 +506,7 @@ func (f *File) Visit(node ast.Node) ast.Visitor {
 			// They run regardless of what we do, so it is just noise.
 			return nil
 		}
+
 	case *ast.GenDecl:
 		if n.Tok != token.VAR {
 			return nil // constants and types are not interesting
@@ -538,6 +541,7 @@ func (f *File) Visit(node ast.Node) ast.Visitor {
 		ast.Walk(f, n.Body)
 		if n.Else == nil {
 			// Add else because we want coverage for "not taken".
+			// TODO(thepudds): could consider not having this if tracking prev location? or at least complicates prev location.
 			n.Else = &ast.BlockStmt{
 				Lbrace: n.Body.End(),
 				Rbrace: n.Body.End(),
@@ -691,7 +695,12 @@ func (f *File) addCounters(pos, blockEnd token.Pos, list []ast.Stmt, extendToClo
 	// Special case: make sure we add a counter to an empty block. Can't do this below
 	// or we will add a counter to an empty statement list after, say, a return statement.
 	if len(list) == 0 {
-		return []ast.Stmt{f.newCounter(pos, blockEnd, 0)}
+		// Use a normal counter that does not update the previous location.
+		// TODO(thepudds): Leaving as-is for now. Consider what we want to do for empty stmt list.
+		// For now, leaving as-is at least helps us avoid tracking the location of the empty else blocks that are auto-added.
+		// One way to rationalize this might be that it helps tracked locations correspond to places that code
+		// exectued (i.e., non-zero length statement list).
+		return f.newCounter(pos, blockEnd, 0)
 	}
 	// We have a block (statement list), but it may have several basic blocks due to the
 	// appearance of statements that affect the flow of control.
@@ -713,7 +722,37 @@ func (f *File) addCounters(pos, blockEnd token.Pos, list []ast.Stmt, extendToClo
 			end = blockEnd
 		}
 		if pos != end { // Can have no source to cover if e.g. blocks abut.
-			newList = append(newList, f.newCounter(pos, end, last))
+			var counterStmts []ast.Stmt
+
+			// We want to track the prior location only once per "real" block.
+			// TODO(thepudds): this is probably an approximation of the proper way to check this,
+			// but it at least serves as a proof-of-concept for a basic fuzzing speed test.
+			if last != len(list) {
+				// Use a traditional counter, and do not update our prior location.
+				// If we hit this case, it means we have a statement list
+				// that started out as non-zero (because zero len lists are handled at top of function),
+				// but here we have not yet arrived at the end of the real block (perhaps because
+				// it was broken up based on basic source block checking above).
+				// The most important thing is to avoid updating our prior location
+				// in location 3 below, which this last != len(list) test avoids.
+				//   func foo() {
+				// 	   // 1. doesn't matter if update previous_loc or not at start of func,
+				//     //    though in this example we don't update previous_loc here.
+				// 	   if a {
+				// 	   	  // 2. DO update previous_loc here.
+				// 	   }
+				// 	   // 3. DON'T update previous_loc here.    <<<<< this is important
+				// 	   if b {
+				// 	   	  // 4. DO update previous_loc here.
+				// 	   }
+				// 	 }
+				counterStmts = f.newCounter(pos, end, last)
+			} else {
+				// Do update our location, and use our previous location as
+				// part of coverage index.
+				counterStmts = f.newCounterTrackLoc(pos, end, last)
+			}
+			newList = append(newList, counterStmts...)
 		}
 		newList = append(newList, list[0:last]...)
 		list = list[last:]
@@ -835,7 +874,7 @@ func genCounter() int {
 	return int(uint16(hash[0]) | uint16(hash[1])<<8)
 }
 
-func (f *File) newCounter(start, end token.Pos, numStmt int) ast.Stmt {
+func (f *File) newCounter(start, end token.Pos, numStmt int) []ast.Stmt {
 	cnt := genCounter()
 
 	if f.blocks != nil {
@@ -855,10 +894,124 @@ func (f *File) newCounter(start, end token.Pos, numStmt int) ast.Stmt {
 		},
 		Index: idx,
 	}
-	return &ast.IncDecStmt{
-		X:   counter,
-		Tok: token.INC,
+	return []ast.Stmt{
+		&ast.IncDecStmt{
+			X:   counter,
+			Tok: token.INC,
+		},
 	}
+}
+
+// newCounterTrackLoc inserts code to update coverage, including
+// tracking the location and using the previously tracked location
+// to xor into the id. In some cases, this might help
+// with better differentiation between edges traversed.
+// The normal newCounter inserts code like:
+//
+//     _go_fuzz_dep_.CoverTab[11111]++
+//
+// newCounterTrackLoc instead inserts code like:
+//
+//   _go_fuzz_dep_.CoverTab[22222 ^ _go_fuzz_previous_location]++
+//   _go_fuzz_previous_location = 22222 >> 1
+//
+// The shift helps differentiate A->B vs. B->A.
+func (f *File) newCounterTrackLoc(start, end token.Pos, numStmt int) []ast.Stmt {
+	cnt := genCounter()
+
+	if f.blocks != nil {
+		s := f.fset.Position(start)
+		e := f.fset.Position(end)
+		*f.blocks = append(*f.blocks, CoverBlock{cnt, f.fullName, s.Line, s.Column, e.Line, e.Column, numStmt})
+	}
+
+	id := &ast.BasicLit{
+		Kind:  token.INT,
+		Value: strconv.Itoa(cnt),
+	}
+	idx := &ast.BinaryExpr{
+		X:  id,
+		Op: token.XOR,
+		Y:  ast.NewIdent(prevLocationVar),
+	}
+	counter := &ast.IndexExpr{
+		X: &ast.SelectorExpr{
+			X:   ast.NewIdent(fuzzdepPkg),
+			Sel: ast.NewIdent("CoverTab"),
+		},
+		Index: idx,
+	}
+	shift := &ast.AssignStmt{
+		Lhs: []ast.Expr{
+			ast.NewIdent(prevLocationVar),
+		},
+		Tok: token.ASSIGN,
+		Rhs: []ast.Expr{
+			&ast.BinaryExpr{
+				X:  id,
+				Op: token.SHR,
+				Y: &ast.BasicLit{
+					Kind:  token.INT,
+					Value: strconv.Itoa(1),
+				},
+			},
+		},
+	}
+
+	stmts := []ast.Stmt{
+		&ast.IncDecStmt{
+			X:   counter,
+			Tok: token.INC,
+		},
+		shift,
+	}
+	return stmts
+}
+
+// PrevLocationWalker is an ast.Vistor.
+type PrevLocationWalker struct{}
+
+// Visit inserts declarations of the previous location variable.
+func (p *PrevLocationWalker) Visit(node ast.Node) ast.Visitor {
+
+	switch n := node.(type) {
+	case *ast.FuncDecl:
+		if n.Name.String() == "init" {
+			// Don't instrument init functions (similar to file.Visit)
+			return nil
+		}
+
+		prevLocation := ast.NewIdent(prevLocationVar)
+		newStmts := []ast.Stmt{
+			&ast.DeclStmt{
+				Decl: &ast.GenDecl{
+					Tok: token.VAR,
+					Specs: []ast.Spec{
+						&ast.ValueSpec{
+							Names: []*ast.Ident{prevLocation},
+							Type:  ast.NewIdent("int"),
+						},
+					},
+				},
+			},
+			&ast.AssignStmt{
+				Lhs: []ast.Expr{
+					ast.NewIdent("_"),
+				},
+				Tok: token.ASSIGN,
+				Rhs: []ast.Expr{
+					prevLocation,
+				},
+			},
+		}
+		n.Body.List = append(newStmts, n.Body.List...)
+	}
+
+	return p
+}
+
+func addPrevLocation(astFile *ast.File) {
+	ast.Walk(&PrevLocationWalker{}, astFile)
 }
 
 func (f *File) print(w io.Writer) {
