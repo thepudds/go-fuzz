@@ -38,17 +38,20 @@ func instrument(pkg, fullName string, fset *token.FileSet, parsedFile *ast.File,
 		file.addImport("go-fuzz-dep", fuzzdepPkg, "CoverTab")
 		ast.Walk(file, file.astFile)
 
-		// TODO(thepudds): need to add package level global only once per
-		// package, but we don't want to add it to packages that don't need it.
-		// This is a workaround to avoid recompiling package that otherwise don't need
-		// to be recompiled, to avoid errors like:
-		//   .../internal/syscall/unix/at_darwin.go:25: missing function body
-		var needPkgGlobals bool
-		if !*addedPkgGlobals && file.addedCounters {
-			needPkgGlobals = true
-			*addedPkgGlobals = true
+		if file.addedCounters {
+			// Add in declarations needed for the location tracking counters.
+			// TODO(thepudds): need to add package level global only once per
+			// package, but we don't want to add it to packages that don't need it.
+			// This is a workaround to avoid recompiling package that otherwise don't need
+			// to be recompiled, to avoid errors like:
+			//   .../internal/syscall/unix/at_darwin.go:25: missing function body
+			var needPkgGlobals bool
+			if !*addedPkgGlobals {
+				needPkgGlobals = true
+				*addedPkgGlobals = true
+			}
+			ast.Walk(&PrevLocationWalker{needPkgGlobals: needPkgGlobals}, file.astFile)
 		}
-		ast.Walk(&PrevLocationWalker{needPkgGlobals: needPkgGlobals}, file.astFile)
 	} else {
 		s := &Sonar{
 			fset:     fset,
