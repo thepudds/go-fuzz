@@ -14,6 +14,9 @@ import (
 // to avoid compilation errors when a user's code shadows the built-in bool.
 type Bool = bool
 
+// Int is just an int. It avoids shadowing problems, similar to Bool.
+type Int = int
+
 // CoverTab holds code coverage.
 // It is initialized to a new array so that instrumentation
 // executed during process initialization has somewhere to write to.
