@@ -23,6 +23,7 @@ import (
 const fuzzdepPkg = "_go_fuzz_dep_"
 const prevLocationVar1 = "_go_fuzz_previous_loc1"
 const prevLocationVar2 = "_go_fuzz_previous_loc2"
+const prevLocationCnt = 2 // TODO: temporary constant for testing. Can be 0, 1, or 2.
 
 func instrument(pkg, fullName string, fset *token.FileSet, parsedFile *ast.File, info *types.Info, out io.Writer, blocks *[]CoverBlock, sonar *[]CoverBlock, addedPkgGlobals *bool) {
 	file := &File{
@@ -923,15 +924,31 @@ func (f *File) newCounter(start, end token.Pos, numStmt int, trackLoc bool) []as
 		Kind:  token.INT,
 		Value: strconv.Itoa(cnt),
 	}
-	idx := &ast.BinaryExpr{
-		X:  id,
-		Op: token.XOR,
-		Y: &ast.BinaryExpr{
-			X:  ast.NewIdent(prevLocationVar1),
+
+	// prevLocationCnt is a temporary constant for testing number of prev locations used.
+	var idx ast.Expr
+	if prevLocationCnt == 0 {
+		idx = id
+	} else if prevLocationCnt == 1 {
+		idx = &ast.BinaryExpr{
+			X:  id,
 			Op: token.XOR,
-			Y:  ast.NewIdent(prevLocationVar2),
-		},
+			Y:  ast.NewIdent(prevLocationVar1),
+		}
+	} else if prevLocationCnt == 2 {
+		idx = &ast.BinaryExpr{
+			X:  id,
+			Op: token.XOR,
+			Y: &ast.BinaryExpr{
+				X:  ast.NewIdent(prevLocationVar1),
+				Op: token.XOR,
+				Y:  ast.NewIdent(prevLocationVar2),
+			},
+		}
+	} else {
+		panic("unsupported value for prevLocationCnt")
 	}
+
 	counter := &ast.IndexExpr{
 		X: &ast.SelectorExpr{
 			X:   ast.NewIdent(fuzzdepPkg),
@@ -939,15 +956,18 @@ func (f *File) newCounter(start, end token.Pos, numStmt int, trackLoc bool) []as
 		},
 		Index: idx,
 	}
+
 	stmts := []ast.Stmt{
 		&ast.IncDecStmt{
 			X:   counter,
 			Tok: token.INC,
 		},
 	}
+
 	if !trackLoc {
 		return stmts
 	}
+
 	shift := func(left, right ast.Expr) *ast.AssignStmt {
 		return &ast.AssignStmt{
 			Lhs: []ast.Expr{
@@ -966,8 +986,12 @@ func (f *File) newCounter(start, end token.Pos, numStmt int, trackLoc bool) []as
 			},
 		}
 	}
-	stmts = append(stmts, shift(ast.NewIdent(prevLocationVar2), ast.NewIdent(prevLocationVar1)))
-	stmts = append(stmts, shift(ast.NewIdent(prevLocationVar1), id))
+	if prevLocationCnt == 1 {
+		stmts = append(stmts, shift(ast.NewIdent(prevLocationVar1), id))
+	} else {
+		stmts = append(stmts, shift(ast.NewIdent(prevLocationVar2), ast.NewIdent(prevLocationVar1)))
+		stmts = append(stmts, shift(ast.NewIdent(prevLocationVar1), id))
+	}
 	return stmts
 }
 
