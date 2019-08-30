@@ -1,4 +1,4 @@
-# Enter a module that depends on another v2+ module.
+# Enter a module that depends on a v2+ module.
 cd foo 
 
 # Sanity check the module seems well formed.
