@@ -47,8 +47,12 @@ script:
 
   # Check if the 'testscript' cmd seems to function at all.
   - cd $GOPATH/src/github.com/dvyukov/go-fuzz
-  - testscript testscripts/go_fuzz_build_help.txt
-  
+  - testscript -v testscripts/go_fuzz_build_help.txt
+
+  # Run our initial test of a v2 module.
+  # TODO: probably makes more sense to move this further down, but place here for now to help iterations.
+  - testscript -v testscripts/go_fuzz_build_v2_modules.txt
+
   # Prepare to test the png example from dvyukov/go-fuzz-corpus.
   - go get -v -d github.com/dvyukov/go-fuzz-corpus/png
   - cd $GOPATH/src/github.com/dvyukov/go-fuzz-corpus/
