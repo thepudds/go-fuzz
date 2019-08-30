@@ -45,6 +45,10 @@ script:
   - "echo 'verify the timeout utility works, including that it exits with status 124 on timeout.'"
   -  "(timeout 2 sleep 10; ret=$?; echo timeout ret=$ret; if [[ $ret -eq 124 ]]; then exit 0; fi; exit $ret)"
 
+  # Check if the 'testscript' cmd seems to function at all.
+  - cd $GOPATH/src/github.com/dvyukov/go-fuzz
+  - testscript testscripts/go_fuzz_build_help.txt
+  
   # Prepare to test the png example from dvyukov/go-fuzz-corpus.
   - go get -v -d github.com/dvyukov/go-fuzz-corpus/png
   - cd $GOPATH/src/github.com/dvyukov/go-fuzz-corpus/
