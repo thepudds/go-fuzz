@@ -1,0 +1,4 @@
+# Start by seeing if anything works at all.
+# Ask go-fuzz-build to emit its help message, which should be a failing status code.
+! go-fuzz-build -h
+stderr 'Usage of.*go-fuzz-build'
