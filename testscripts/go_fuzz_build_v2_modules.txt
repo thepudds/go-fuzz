@@ -10,7 +10,7 @@ go build
 # Ask go-fuzz-build to build, which should find the fuzz target in foo.
 # Right now, this should fail because we have not pushed any code to this branch that attempts to support modules,
 # and v2 modules are particularly problematic if not handled properly.
-! exec go-fuzz-build -func=FuzzDependOnV2Mod
+exec go-fuzz-build -func=FuzzDependOnV2Mod
 
 # Define two modules.
 # example.com/foo has a fuzz function, and depends on example.com/bar/v2.
