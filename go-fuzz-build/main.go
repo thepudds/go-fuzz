@@ -59,7 +59,7 @@ func makeTags() string {
 func basePackagesConfig() *packages.Config {
 	cfg := new(packages.Config)
 
-	// Preliminary module support: note that we do not set 
+	// Preliminary modules support: note that we do not set 
 	// GO111MODULE here in order to respect any GO111MODULE setting by the user
 	// as we are finding dependencies. Note, however, that we are
 	// still setting up a GOPATH to build, so we later will force 
@@ -498,10 +498,14 @@ func (c *Context) buildInstrumentedBinary(blocks *[]CoverBlock, sonar *[]CoverBl
 	}
 	args = append(args, "-o", outf, mainPkg)
 	cmd := exec.Command("go", args...)
+
+	// Preliminary modules support: we are constructing a GOPATH
+	// environment, so while building we force GOPATH mode here
+	// via GO111MODULE=off.
 	cmd.Env = append(os.Environ(),
 		"GOROOT="+filepath.Join(c.workdir, "goroot"),
 		"GOPATH="+filepath.Join(c.workdir, "gopath"),
-		"GO111MODULE=off", // temporary measure until we have proper module support
+		"GO111MODULE=off",
 	)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		c.failf("failed to execute go build: %v\n%v", err, string(out))
