@@ -12,6 +12,10 @@ go build
 # and v2 modules are particularly problematic if not handled properly.
 exec go-fuzz-build -func=FuzzDependOnV2Mod
 
+# TODO: temporary sanity check for go-fuzz-defs
+exec go list -f {{.Dir}} github.com/dvyukov/go-fuzz/go-fuzz-defs
+! go list -f {{.Dir}} github.com/dvyukov/go-fuzz/go-fuzz-defs
+
 # Define two modules.
 # example.com/foo has a fuzz function, and depends on example.com/bar/v2.
 
