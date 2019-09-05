@@ -13,6 +13,8 @@ go build
 exec go-fuzz-build -func=FuzzDependOnV2Mod
 
 # TODO: temporary sanity check for go-fuzz-defs
+exec go list -m all
+go list -m all
 exec go list -f {{.Dir}} github.com/dvyukov/go-fuzz/go-fuzz-defs
 ! go list -f {{.Dir}} github.com/dvyukov/go-fuzz/go-fuzz-defs
 
