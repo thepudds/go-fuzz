@@ -1,8 +1,13 @@
-# These steps validate we can fuzz a module using -mod=vendor,
-# including we validate that the actual code in the 'vendor' directory is used.
+# These steps validate we get a proper error
+# if we try to fuzz a module using GOFLAGS=-mod=vendor.
+# It then stops.
+
+# For the future, we have some unexecuted steps after the stop.
+# These don't run now, but attempt to validate fuzzing a module using -mod=vendor,
+# including validating that the actual code in the 'vendor' directory is used.
 
 # TODO: -mod=vendor is not yet supported with go-fuzz, so the majority of this test is disabled with a 'stop' command.
-# If enabled, this test currently fails with error:
+# If you change go-fuzz-build to remove the check for -mod=vendor, it currently fails with error:
 #    > exec go-fuzz-build -func=FuzzDependOnVendor
 #    [stderr]
 #    could not load packages: go [list -e -json -compiled=true -test=false -export=false -deps=true -find=false -tags gofuzz -- . 
@@ -46,9 +51,19 @@ exec go build
 env GOFLAGS=
 ! exec go build
 
+# Validate we get the expected error if we try to run go-fuzz-build
+# with -mod=vendor in GOFLAGS.
+env GOFLAGS=-mod=vendor
+! exec go-fuzz-build -func=FuzzDependOnVendor
+stderr 'GOFLAGS with -mod=vendor is not supported'
+env GOFLAGS='-v -mod=vendor'
+! exec go-fuzz-build -func=FuzzDependOnVendor
+stderr 'GOFLAGS with -mod=vendor is not supported'
+
 # This is as far as we can currently go here, given go-fuzz does not support -mod=vendor.
 # The remainder of the test has never passed, but we will leave here in case useful
-# in the future.
+# in the future. The rest of the tests are set to pass as if GOFLAGS=-mod=vendor worked,
+# but they have never run, so might have a typo or other mistake.
 stop 'do not run actual vendoring test. -mod=vendor not yet supported.'
 
 # Ask go-fuzz-build to build, specifying the fuzz function for foo.
