@@ -74,6 +74,18 @@ func basePackagesConfig() *packages.Config {
 	return cfg
 }
 
+// checkModVendor reports if the GOFLAGS env variable
+// contains -mod=vendor, which enables vendoring for modules.
+func checkModVendor() bool {
+	val := os.Getenv("GOFLAGS")
+	for _, s := range strings.Split(val, " ") {
+		if s == "-mod=vendor" {
+			return true
+		}
+	}
+	return false
+}
+
 // main copies the package with all dependent packages into a temp dir,
 // instruments Go source files there, and builds setting GOROOT to the temp dir.
 func main() {
@@ -93,6 +105,12 @@ func main() {
 	}
 	if *flagLibFuzzer && *flagRace {
 		c.failf("-race and -libfuzzer are incompatible")
+	}
+	if checkModVendor() {
+		// Preliminary modules support: we don't support -mod=vendor.
+		// Part of the issue is go-fuzz-dep and go-fuzz-defs
+		// won't be in the user's vendor directory.
+		c.failf("GOFLAGS with -mod=vendor is not supported")
 	}
 
 	c.startProfiling()  // start pprof as requested
