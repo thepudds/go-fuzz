@@ -60,7 +60,7 @@ script:
   # TODO: probably makes more sense to move this further down, but place here for now for faster iterations.
   - testscript -v testscripts/mod_go_fuzz_dep.txt
   - testscript -v testscripts/mod_outside_gopath.txt
-  - testscript -v testscripts/mod_in_gopath.txt
+  - testscript -v testscripts/mod_inside_gopath.txt
   - testscript -v testscripts/mod_v2.txt
   - testscript -v testscripts/mod_vendor.txt
 
