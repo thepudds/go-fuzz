@@ -49,14 +49,20 @@ script:
   - "echo 'verify the timeout utility works, including that it exits with status 124 on timeout.'"
   -  "(timeout 2 sleep 10; ret=$?; echo timeout ret=$ret; if [[ $ret -eq 124 ]]; then exit 0; fi; exit $ret)"
 
-  # Check if the 'testscript' cmd seems to function at all.
+  # Sanity check that the 'testscript' cmd seems to function at all.
   # If all the testscripts fail, this is a good one to troubleshoot first.
   - cd $GOPATH/src/github.com/dvyukov/go-fuzz
   - testscript -v testscripts/fuzz_help.txt
 
-  # Run our initial tests for fuzzing a v2 module.
-  # TODO: probably makes more sense to move this further down, but place here for now to help iterations.
+  # Run our tests for fuzzing modules.
+  # If multiple modules testcripts fail, probably makes sense to start by troubleshooting
+  # the earliest failing testscript.
+  # TODO: probably makes more sense to move this further down, but place here for now for faster iterations.
+  - testscript -v testscripts/mod_go_fuzz_dep.txt
+  - testscript -v testscripts/mod_outside_gopath.txt
+  - testscript -v testscripts/mod_in_gopath.txt
   - testscript -v testscripts/mod_v2.txt
+  - testscript -v testscripts/mod_vendor.txt
 
   # Prepare to test the png example from dvyukov/go-fuzz-corpus.
   - go get -v -d github.com/dvyukov/go-fuzz-corpus/png
