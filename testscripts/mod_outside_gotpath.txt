@@ -32,7 +32,7 @@ exists foo-fuzz.zip
 # Note that 'timeout(1)' will error here, so we preface the invocation with '!'.
 # For travis on Windows, we install 'timeout(1)' as part of our travis setup steps.
 # To test this locally on Windows, you might need to change 'timeout' to '\cygwin64\bin\timeout' or similar.
-! exec \cygwin64\bin\timeout 5 go-fuzz -procs=1 -func=FuzzMod
+! exec timeout 5 go-fuzz -procs=1 -func=FuzzMod
 stderr 'workers: \d+, corpus: '
 
 # Clean up.
@@ -52,7 +52,7 @@ exec go-fuzz-build -func=FuzzMod
 exists foo-fuzz.zip
 
 # Validate we can start fuzzing.
-! exec \cygwin64\bin\timeout 5 go-fuzz -procs=1 -func=FuzzMod
+! exec timeout 5 go-fuzz -procs=1 -func=FuzzMod
 stderr 'workers: \d+, corpus: '
 
 # Clean up.
@@ -74,7 +74,7 @@ exec go-fuzz-build -func=FuzzMod
 exists foo-fuzz.zip
 
 # Validate we can start fuzzing.
-! exec \cygwin64\bin\timeout 5 go-fuzz -procs=1 -func=FuzzMod
+! exec timeout 5 go-fuzz -procs=1 -func=FuzzMod
 stderr 'workers: \d+, corpus: '
 
 # Clean up.
