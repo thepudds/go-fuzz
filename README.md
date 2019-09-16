@@ -139,7 +139,7 @@ go-fuzz has preliminary support for fuzzing [Go Modules](github.com/golang/go/wi
 go-fuzz respects the standard `GO111MODULE` environment variable, which can be set to `on`, `off`, or `auto`.
 
 Prior to invoking go-fuzz, you must have a `require` directive for `github.com/dvyukov/go-fuzz` in your `go.mod` file (and if you do not have one, go-fuzz might add one automatically).
-A common approach for tracking tool dependecies like this is [via a tools.go file](https://github.com/golang/go/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module).
+A common approach for tracking tool dependencies like this is [via a tools.go file](https://github.com/golang/go/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module).
 Alternatively, you could for example manually add `require github.com/dvyukov/go-fuzz latest` to your `go.mod` file.
 
 Vendoring with modules is not yet supported. 
