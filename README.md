@@ -102,9 +102,6 @@ $ go-fuzz-build
 ```
 This will produce png-fuzz.zip archive.
 
-Note that go-fuzz [does not support modules yet](https://github.com/dvyukov/go-fuzz/issues/195).
-`go-fuzz-build` disables modules by setting environment variable `GO111MODULE=off` during the build.
-
 Now we are ready to go:
 ```
 $ go-fuzz
@@ -135,6 +132,21 @@ grows fuzzer uncovers new lines of code; size of the bitmap is 64K; ideally ```c
 value should be less than ~5000, otherwise fuzzer can miss new interesting inputs
 due to hash collisions. And finally ```uptime``` is uptime of the process. This same
 information is also served via http (see the ```-http``` flag).
+
+## Modules support
+
+go-fuzz has preliminary support for fuzzing [Go Modules](github.com/golang/go/wiki/Modules). 
+go-fuzz respects the standard `GO111MODULE` environment variable, which can be set to `on`, `off`, or `auto`.
+
+Prior to invoking go-fuzz, you must have a `require` directive for `github.com/dvyukov/go-fuzz` in your `go.mod` file (and if you do not have one, go-fuzz might add one automatically).
+A common approach for tracking tool dependecies like this is [via a tools.go file](https://github.com/golang/go/wiki/Modules#how-can-i-track-tool-dependencies-for-a-module).
+Alternatively, you could for example manually add `require github.com/dvyukov/go-fuzz latest` to your `go.mod` file.
+
+Vendoring with modules is not yet supported. 
+A `vendor` directory will be ignored, and go-fuzz will report an error if `GOFLAGS=-mod=vendor` is set.
+
+Note that while modules are used to prepare the build, the final instrumented build is still executed in GOPATH mode.
+For most code, this should not matter.
 
 ## libFuzzer support
 
